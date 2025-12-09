@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Desvio de Asteroides (V7 - Final)</title>
+    <style>
+        /* CSS Básico */
+        body {
+            font-family: 'Courier New', monospace;
+            text-align: center;
+            background-color: #111;
+            color: #fff;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        #main-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        canvas {
+            border: 2px solid #00ff00;
+            background-color: #000;
+            display: none;
+        }
+        #score-board {
+            margin-top: 10px;
+            font-size: 1.2em;
+            display: none;
+        }
+        
+        /* CSS do Menu Inicial */
+        #start-menu {
+            background-color: #333;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+            width: 300px;
+        }
+        #start-menu h2 {
+            color: #00ff00;
+        }
+        .select-group {
+            margin: 15px 0;
+        }
+        select {
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+        }
+        #start-button {
+            padding: 10px 20px;
+            font-size: 1.1em;
+            cursor: pointer;
+            background-color: #00ccff;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.2s;
+            margin-top: 15px;
+        }
+        #start-button:hover {
+            background-color: #0088aa;
+        }
+        .instructions {
+            font-size: 0.9em;
+            color: #ccc;
+            margin-top: 15px;
+        }
+        /* Estilo para o botão de restart */
+        #restart-btn {
+            padding: 15px 30px; 
+            font-size: 1.5em; 
+            cursor: pointer; 
+            background-color: #00ccff; 
+            color: #000; 
+            border: none; 
+            border-radius: 5px; 
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="main-container">
+        <div id="start-menu">
+            <h2>Desvio de Asteroides</h2>
+            
+            <div class="select-group">
+                <label for="level-select">Selecione o Nível:</label>
+                <select id="level-select">
+                    <option value="easy">Fácil</option>
+                    <option value="medium" selected>Médio</option>
+                    <option value="hard">Difícil</option>
+                </select>
+            </div>
+            
+            <div class="select-group">
+                <label for="color-select">Cor da Nave:</label>
+                <select id="color-select">
+                    <option value="#00ccff" selected>Azul Neon</option>
+                    <option value="#00ff00">Verde Plasma</option>
+                    <option value="#ff00ff">Magenta Fúria</option>
+                    <option value="#ffff00">Amarelo Cuidado</option>
+                    <option value="#ffffff">Branco Puro</option>
+                </select>
+            </div>
+            
+            <button id="start-button" onclick="initializeGame()">INICIAR JOGO</button>
+            <p class="instructions">Use **WASD** ou as setas para mover (4 direções).</p>
+            <p class="instructions">Pressione **ESPAÇO** para atirar! Colete power-ups!</p>
+        </div>
+
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="score-board">
+            Pontuação: <span id="score">0</span> | Modo de Fogo: <span id="fire-mode-display">Simples</span>
+        </div>
+    </div>
+
+    <script>
+        // JavaScript (Lógica do Jogo e Canvas)
+        
+        // 1. Configuração Inicial do Canvas e Elementos
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const fireModeDisplay = document.getElementById('fire-mode-display');
+
+        // --- CORREÇÃO AQUI: Definindo as variáveis do menu ---
+        const startMenu = document.getElementById('start-menu');
+        const scoreBoard = document.getElementById('score-board');
+        const levelSelect = document.getElementById('level-select');
+        const colorSelect = document.getElementById('color-select');
+        // -----------------------------------------------------
+
+        // Estado das Teclas Pressionadas para Movimento Suave
+        const keysPressed = {
+            left: false, right: false, up: false, down: false, shoot: false 
+        };
+        
+        // 2. Tabela de Dificuldade
+        const difficultySettings = {
+            'easy': { speedMultiplier: 1.0, spawnRate: 70, playerSize: 20 },
+            'medium': { speedMultiplier: 2.0, spawnRate: 35, playerSize: 18 },
+            'hard': { speedMultiplier: 2.5, spawnRate: 15, playerSize: 12 }
+        };
+
+        // 3. Variáveis de Estado do Jogo (Geral e Power-ups)
+        let gameLoopId;
+        let score = 0;
+        let isGameOver = false;
+        let asteroidSpeedMultiplier = 0;
+        let asteroidSpawnRate = 0;
+        let frameCount = 0;
+        
+        // Controle de Dano e Invulnerabilidade
+        let isInvulnerable = false;
+        let invulnerabilityTimer = 0;
+        const INVULNERABILITY_FRAMES = 60; // 1 segundo
+        const DAMAGE_BLINK_RATE = 5; 
+
+        // Controle de Power-ups
+        let lastShotFrame = 0;
+        let currentFireDelay = 10; 
+        const MIN_FIRE_DELAY_CAP = 2; 
+        const FIRE_DELAY_INCREASE = 3; 
+        let fireMode = 'single'; 
+        let powerUpTimer = 0;
+        const RAPID_FIRE_DURATION = 300; 
+        const TRIPLE_SHOT_DURATION = 450; 
+
+        // Estrelas de Fundo
+        const stars = [];
+        const NUM_STARS = 100;
+        
+        // 4. Objeto Nave (Com Saúde)
+        const player = {
+            x: canvas.width / 2,
+            y: canvas.height - 30,
+            width: 20,
+            height: 20,
+            speed: 5,
+            color: '#00ccff',
+            maxHealth: 5, 
+            currentHealth: 5, 
+            draw() {
+                // Efeito de piscar durante a invulnerabilidade
+                if (isInvulnerable && frameCount % DAMAGE_BLINK_RATE < DAMAGE_BLINK_RATE / 2) {
+                    ctx.globalAlpha = 0.5;
+                }
+
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                ctx.lineTo(this.x - this.width / 2, this.y + this.height);
+                ctx.lineTo(this.x + this.width / 2, this.y + this.height);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Indicador de Power-up
+                if (fireMode === 'rapid') {
+                    ctx.fillStyle = 'yellow';
+                    ctx.fillRect(this.x - 2, this.y + this.height + 2, 4, 2);
+                } else if (fireMode === 'triple') {
+                    ctx.fillStyle = '#ff00ff';
+                    ctx.fillRect(this.x - 2, this.y + this.height + 2, 4, 2);
+                }
+                
+                ctx.globalAlpha = 1.0; // Reseta transparência
+            }
+        };
+
+        // 5. Arrays de Entidades
+        const asteroids = [];
+        const bullets = [];
+        const powerUps = []; 
+
+        /**
+         * 6. CLASSES
+         */
+        
+        // Classe Base para Asteroides (Padrão)
+        class Asteroid {
+            constructor() {
+                this.radius = Math.random() * 10 + 8;
+                this.x = Math.random() * (canvas.width - this.radius * 2) + this.radius;
+                this.y = -this.radius;
+                this.speed = Math.random() * 1.5 + 1; 
+                this.speed *= asteroidSpeedMultiplier;
+                this.color = '#cccccc';
+                this.hitsToDestroy = 1; 
+                this.currentHits = 0;
+                this.scoreValue = 10; 
+                this.damage = 1; 
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            update() {
+                this.y += this.speed;
+            }
+        }
+        
+        // Classe Asteroide Pesado
+        class HeavyAsteroid extends Asteroid {
+            constructor() {
+                super(); 
+                this.radius = Math.random() * 15 + 15;
+                this.speed = Math.random() * 1.5 + 0.5;
+                this.speed *= asteroidSpeedMultiplier;
+                this.color = '#7d3333'; 
+                this.hitsToDestroy = 3; 
+                this.currentHits = 0; 
+                this.scoreValue = 30;
+                this.damage = 3; 
+            }
+            
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Indicador de vida (barra de HP)
+                const hpPercent = (this.hitsToDestroy - this.currentHits) / this.hitsToDestroy;
+                const barWidth = this.radius * 2;
+                ctx.fillStyle = 'red';
+                ctx.fillRect(this.x - this.radius, this.y - this.radius - 5, barWidth * hpPercent, 3);
+            }
+        }
+
+        class Bullet {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.width = 4;
+                this.height = 10;
+                this.speed = 10;
+                this.color = color;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x - this.width / 2, this.y, this.width, this.height);
+            }
+
+            update() {
+                this.y -= this.speed;
+            }
+        }
+
+        // Classe PowerUp (Rapid Fire ou Triple Shot)
+        class PowerUp {
+            constructor(x, y) {
+                this.type = Math.random() < 0.5 ? 'rapidFire' : 'tripleShot'; 
+                this.x = x;
+                this.y = y;
+                this.radius = 8;
+                this.speed = 1.0; 
+                this.color = this.type === 'rapidFire' ? '#ffff00' : '#ff00ff'; 
+                this.label = this.type === 'rapidFire' ? 'F' : 'T';
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#111';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.label, this.x, this.y + 4);
+            }
+
+            update() {
+                this.y += this.speed;
+            }
+        }
+
+
+        /**
+         * 7. Funções de Inicialização e Lógica
+         */
+        function initializeGame() {
+            const selectedLevel = levelSelect.value;
+            const settings = difficultySettings[selectedLevel];
+            
+            player.color = colorSelect.value; 
+
+            asteroidSpeedMultiplier = settings.speedMultiplier;
+            asteroidSpawnRate = settings.spawnRate;
+            
+            player.maxHealth = 5;
+            player.currentHealth = player.maxHealth;
+            isInvulnerable = false;
+            invulnerabilityTimer = 0;
+
+            fireMode = 'single';
+            currentFireDelay = 10;
+            powerUpTimer = 0;
+            
+            player.width = settings.playerSize;
+            player.height = settings.playerSize;
+            player.x = canvas.width / 2;
+            player.y = canvas.height - player.height * 2;
+            
+            lastShotFrame = 0;
+            score = 0;
+            isGameOver = false;
+            frameCount = 0;
+            asteroids.length = 0;
+            bullets.length = 0;
+            powerUps.length = 0; 
+            
+            scoreElement.textContent = score;
+            fireModeDisplay.textContent = 'Simples';
+
+            // Inicializar estrelas
+            stars.length = 0;
+            for (let i = 0; i < NUM_STARS; i++) {
+                stars.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    size: Math.random() * 1.5 + 0.5,
+                    speed: Math.random() * 0.5 + 0.1 
+                });
+            }
+            
+            startMenu.style.display = 'none';
+            canvas.style.display = 'block';
+            scoreBoard.style.display = 'block';
+            
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function spawnAsteroid() {
+            if (frameCount % asteroidSpawnRate === 0) {
+                // 5% de chance de spawnar Asteroide Pesado
+                if (Math.random() < 0.05) {
+                    asteroids.push(new HeavyAsteroid());
+                } else {
+                    asteroids.push(new Asteroid());
+                }
+            }
+        }
+        
+        function handlePlayerMovement() {
+            // Movimento Horizontal
+            if (keysPressed.left && player.x > 0) {
+                player.x -= player.speed;
+            }
+            if (keysPressed.right && player.x < canvas.width - player.width) {
+                player.x += player.speed;
+            }
+            
+            // Movimento Vertical
+            if (keysPressed.up && player.y > 0) {
+                player.y -= player.speed;
+            }
+            if (keysPressed.down && player.y < canvas.height - player.height) {
+                player.y += player.speed;
+            }
+            
+            // Disparo contínuo
+            if (keysPressed.shoot) {
+                shoot();
+            }
+        }
+
+        function shoot() {
+            if (isGameOver) return;
+            
+            if (frameCount - lastShotFrame >= currentFireDelay) {
+                
+                // playSound('laser'); 
+
+                if (fireMode === 'triple') {
+                    bullets.push(new Bullet(player.x - 8, player.y - player.height / 2, player.color));
+                    bullets.push(new Bullet(player.x, player.y - player.height / 2, player.color));
+                    bullets.push(new Bullet(player.x + 8, player.y - player.height / 2, player.color));
+                } else {
+                    bullets.push(new Bullet(player.x, player.y - player.height / 2, player.color));
+                }
+                
+                lastShotFrame = frameCount;
+            }
+        }
+
+        function checkCollisions() {
+            // A. Colisão Tiros vs Asteroides
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                if (bullet.y < 0) {
+                    bullets.splice(i, 1);
+                    continue;
+                }
+
+                for (let j = asteroids.length - 1; j >= 0; j--) {
+                    let asteroid = asteroids[j];
+
+                    const dx = bullet.x - asteroid.x;
+                    const dy = (bullet.y + bullet.height / 2) - asteroid.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < asteroid.radius + bullet.width / 2) { 
+                        bullets.splice(i, 1); 
+                        i--; 
+                        
+                        asteroid.currentHits++;
+                        if (asteroid.currentHits < asteroid.hitsToDestroy) {
+                            break; 
+                        }
+                        
+                        // Asteroide Destruído!
+                        // playSound('explosion'); 
+
+                        if (Math.random() < 0.15) { 
+                            powerUps.push(new PowerUp(asteroid.x, asteroid.y));
+                        }
+
+                        score += asteroid.scoreValue; 
+                        scoreElement.textContent = score;
+                        asteroids.splice(j, 1);
+                        break;
+                    }
+                }
+            }
+
+            // B. Colisão Nave vs Power-up (Coleta)
+            for (let i = powerUps.length - 1; i >= 0; i--) {
+                const powerUp = powerUps[i];
+                
+                if (powerUp.y > canvas.height + powerUp.radius) {
+                    powerUps.splice(i, 1);
+                    continue;
+                }
+                
+                const dist_x = Math.abs(powerUp.x - player.x);
+                const dist_y = Math.abs(powerUp.y - (player.y + player.height / 2));
+                const distance = Math.sqrt(dist_x * dist_x + dist_y * dist_y);
+
+                if (distance < powerUp.radius + player.width / 4) { 
+                    
+                    if (powerUp.type === 'rapidFire') {
+                        fireMode = 'rapid';
+                        currentFireDelay = Math.max(currentFireDelay - FIRE_DELAY_INCREASE, MIN_FIRE_DELAY_CAP); 
+                        powerUpTimer = RAPID_FIRE_DURATION;
+                    } else if (powerUp.type === 'tripleShot') {
+                        fireMode = 'triple';
+                        currentFireDelay = 10; 
+                        powerUpTimer = TRIPLE_SHOT_DURATION;
+                    }
+                    powerUps.splice(i, 1);
+                    fireModeDisplay.textContent = fireMode === 'rapid' ? 'RÁPIDO' : 'TRIPLO';
+                }
+            }
+            
+
+            // C. Colisão Nave vs Asteroides (Dano com Invulnerabilidade)
+            for (let i = asteroids.length - 1; i >= 0; i--) {
+                const asteroid = asteroids[i];
+                
+                const dist_x = Math.abs(asteroid.x - (player.x));
+                const dist_y = Math.abs(asteroid.y - (player.y + player.height / 2));
+                const distance = Math.sqrt(dist_x * dist_x + dist_y * dist_y);
+
+                if (distance < asteroid.radius + player.width / 2) { 
+                    
+                    if (!isInvulnerable) { 
+                        
+                        player.currentHealth -= asteroid.damage; 
+                        
+                        // Ativa Invulnerabilidade
+                        isInvulnerable = true;
+                        invulnerabilityTimer = INVULNERABILITY_FRAMES; 
+                        
+                        document.body.style.backgroundColor = 'red';
+                        setTimeout(() => { document.body.style.backgroundColor = '#111'; }, 100);
+                    }
+                    
+                    asteroids.splice(i, 1); 
+                    
+                    if (player.currentHealth <= 0) {
+                        gameOver();
+                    }
+                    
+                } else if (asteroid.y > canvas.height + asteroid.radius) {
+                    score++;
+                    scoreElement.textContent = score;
+                    asteroids.splice(i, 1);
+                }
+            }
+        }
+
+        function update() {
+            if (isGameOver) return;
+
+            handlePlayerMovement();
+
+            frameCount++;
+            spawnAsteroid();
+            
+            // Lógica de Power-up Timer
+            if (powerUpTimer > 0) {
+                powerUpTimer--;
+                if (powerUpTimer <= 0) {
+                    fireMode = 'single';
+                    currentFireDelay = 10; 
+                    fireModeDisplay.textContent = 'Simples';
+                }
+            }
+            
+            // Lógica de Invulnerabilidade Timer
+            if (isInvulnerable) {
+                invulnerabilityTimer--;
+                if (invulnerabilityTimer <= 0) {
+                    isInvulnerable = false;
+                }
+            }
+
+            // Dificuldade Dinâmica (a cada 50 pontos)
+            if (score > 0 && score % 50 === 0 && frameCount % 60 === 0) { 
+                asteroidSpeedMultiplier *= 1.1; 
+                asteroidSpawnRate = Math.max(10, asteroidSpawnRate - 2); 
+            }
+
+            // Movimento das Estrelas
+            stars.forEach(star => {
+                star.y += star.speed;
+                if (star.y > canvas.height) {
+                    star.y = 0;
+                    star.x = Math.random() * canvas.width;
+                }
+            });
+            
+            asteroids.forEach(asteroid => asteroid.update());
+            bullets.forEach(bullet => bullet.update());
+            powerUps.forEach(powerUp => powerUp.update());
+            
+            checkCollisions();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Desenhar Estrelas
+            ctx.fillStyle = '#ffffff';
+            stars.forEach(star => {
+                ctx.fillRect(star.x, star.y, star.size, star.size);
+            });
+
+            player.draw();
+            asteroids.forEach(asteroid => asteroid.draw());
+            bullets.forEach(bullet => bullet.draw());
+            powerUps.forEach(powerUp => powerUp.draw());
+            
+            // Desenhar Health Bar (Barra de Vida)
+            const barX = 10;
+            const barY = canvas.height - 20;
+            const barWidth = 100;
+            const barHeight = 10;
+            const currentBarWidth = (player.currentHealth / player.maxHealth) * barWidth;
+
+            // Fundo e Borda
+            ctx.strokeStyle = '#00ff00';
+            ctx.strokeRect(barX, barY, barWidth, barHeight);
+            
+            // Preenchimento (Verde -> Amarelo -> Vermelho)
+            let healthColor = '#00ff00';
+            if (player.currentHealth / player.maxHealth < 0.5) healthColor = '#ffff00';
+            if (player.currentHealth / player.maxHealth < 0.25) healthColor = 'red';
+            
+            ctx.fillStyle = healthColor;
+            ctx.fillRect(barX, barY, currentBarWidth, barHeight);
+            
+            // Label
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '10px Courier New';
+            ctx.textAlign = 'left';
+            ctx.fillText(`HP: ${player.currentHealth}/${player.maxHealth}`, barX + 110, barY + 8);
+            
+            if (isGameOver) {
+                ctx.fillStyle = 'red';
+                ctx.font = '48px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText('GAME OVER!', canvas.width / 2, canvas.height / 2);
+                
+                if (!document.getElementById('restart-btn')) {
+                    const restartBtn = document.createElement('button');
+                    restartBtn.id = 'restart-btn';
+                    restartBtn.textContent = 'Tentar Novamente';
+                    restartBtn.onclick = showMenu;
+                    document.getElementById('main-container').appendChild(restartBtn);
+                }
+            }
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            if (!isGameOver) {
+                gameLoopId = requestAnimationFrame(gameLoop);
+            }
+        }
+
+        function gameOver() {
+            isGameOver = true;
+            cancelAnimationFrame(gameLoopId);
+        }
+        
+        function showMenu() {
+            isGameOver = true;
+            const restartBtn = document.getElementById('restart-btn');
+            if (restartBtn) {
+                restartBtn.remove();
+            }
+            startMenu.style.display = 'block';
+            canvas.style.display = 'none';
+            scoreBoard.style.display = 'none';
+        }
+
+        // 8. Input do Usuário (Teclado - Movimento Contínuo)
+        
+        function setKey(key, isPressed) {
+            if (key === 'arrowleft' || key === 'a') {
+                keysPressed.left = isPressed;
+            } else if (key === 'arrowright' || key === 'd') {
+                keysPressed.right = isPressed;
+            } else if (key === 'arrowup' || key === 'w') {
+                keysPressed.up = isPressed;
+            } else if (key === 'arrowdown' || key === 's') {
+                keysPressed.down = isPressed;
+            } else if (key === ' ') { 
+                keysPressed.shoot = isPressed;
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (isGameOver) return;
+            const key = e.key.toLowerCase();
+            setKey(key, true);
+            // Previne que a barra de espaço role a página
+            if (key === ' ') e.preventDefault(); 
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            setKey(key, false);
+        });
+        
+    </script>
+</body>
+</html>
